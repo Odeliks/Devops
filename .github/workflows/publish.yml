@@ -1,0 +1,52 @@
+name: publish
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push-docker:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+
+    - run: pip3 install -r src/requirements.txt
+
+    - uses: actions/setup-node@v3
+      with:
+        node-version: 18
+    - run: npm install -g snyk
+    - run: snyk auth ${{ secrets.SNYK_TOKEN }}
+    - run: snyk test --all-projects
+
+    - run: |
+        curl -o sonar-scanner-cli.zip -L https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.6.2.2472-linux.zip
+        unzip sonar-scanner-cli.zip
+        mv sonar-scanner-4.6.2.2472-linux sonar-scanner
+        export PATH=$PATH:$(pwd)/sonar-scanner/bin
+        echo 'sonar.host.url=https://sonarcloud.io' >> sonar-project.properties
+      shell: bash
+
+    # - run: sonar-scanner
+    #   env:
+    #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+    - run: docker login -u ${{ secrets.DOCKERHUB_USERNAME }} -p ${{ secrets.DOCKERHUB_PASSWORD }}
+    - run: docker build -t python-app .
+
+    - run: |
+        wget https://github.com/aquasecurity/trivy/releases/download/v0.18.3/trivy_0.18.3_Linux-64bit.deb
+        sudo dpkg -i trivy_0.18.3_Linux-64bit.deb
+      working-directory: .
+    - run: trivy ${{ secrets.DOCKERHUB_USERNAME }}/python-app:latest
+      working-directory: .
+
+    - run: |
+        docker tag python-app ${{ secrets.DOCKERHUB_USERNAME }}/python-app:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/python-app:latest
